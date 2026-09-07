@@ -1,4 +1,5 @@
 @file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.minimal.launcher
 
 import android.Manifest
@@ -38,7 +39,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -56,7 +59,7 @@ class MainActivity : ComponentActivity() {
 
     private val callLogPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) HubRepository.loadCallLog(this)
+            if (granted) runCatching { HubRepository.loadCallLog(this) }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,7 +70,11 @@ class MainActivity : ComponentActivity() {
                 when (page) {
                     0 -> MinimalHome(
                         loadApps = { loadInstalledApps() },
-                        launchApp = { pkg -> packageManager.getLaunchIntentForPackage(pkg)?.let(::startActivity) },
+                        launchApp = { pkg ->
+                            runCatching {
+                                packageManager.getLaunchIntentForPackage(pkg)?.let(::startActivity)
+                            }
+                        },
                         runIntent = { runCatching { startActivity(it) } }
                     )
                     1 -> HubScreen(
@@ -81,46 +88,62 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED)
-            HubRepository.loadCallLog(this)
+        runCatching {
+            if (checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED)
+                HubRepository.loadCallLog(this)
+        }
     }
 
     private fun requestCallLog() {
-        if (checkSelfPermission(Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED)
-            callLogPermission.launch(Manifest.permission.READ_CALL_LOG)
-        else HubRepository.loadCallLog(this)
+        runCatching {
+            if (checkSelfPermission(Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED)
+                callLogPermission.launch(Manifest.permission.READ_CALL_LOG)
+            else HubRepository.loadCallLog(this)
+        }
     }
 
-    private fun hasNotificationAccess(): Boolean {
+    private fun hasNotificationAccess(): Boolean = runCatching {
         val enabled = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: return false
-        return enabled.contains(packageName)
-    }
+        enabled.contains(packageName)
+    }.getOrDefault(false)
 
-    private fun loadInstalledApps(): List<AppEntry> {
+    private fun loadInstalledApps(): List<AppEntry> = runCatching {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        return packageManager.queryIntentActivities(intent, PackageManager.MATCH_ALL)
-            .map { AppEntry(it.loadLabel(packageManager).toString(), it.activityInfo.packageName) }
+        packageManager.queryIntentActivities(intent, 0)
+            .mapNotNull { info ->
+                runCatching {
+                    AppEntry(
+                        info.loadLabel(packageManager).toString(),
+                        info.activityInfo.packageName
+                    )
+                }.getOrNull()
+            }
             .filter { it.packageName != packageName }
             .distinctBy { it.packageName }
             .sortedBy { it.label.lowercase() }
-    }
+    }.getOrDefault(emptyList())
 }
 
 object Store {
     private const val PREFS = "minimal_store"
     private fun prefs(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun list(c: Context, key: String): List<String> =
+    fun list(c: Context, key: String): List<String> = runCatching {
         prefs(c).getString(key, "")!!.split('\u0001').filter { it.isNotBlank() }
+    }.getOrDefault(emptyList())
 
     fun add(c: Context, key: String, item: String) {
-        val cur = list(c, key) + item
-        prefs(c).edit().putString(key, cur.joinToString("\u0001")).apply()
+        runCatching {
+            val cur = list(c, key) + item
+            prefs(c).edit().putString(key, cur.joinToString("\u0001")).apply()
+        }
     }
 
     fun remove(c: Context, key: String, item: String) {
-        val cur = list(c, key) - item
-        prefs(c).edit().putString(key, cur.joinToString("\u0001")).apply()
+        runCatching {
+            val cur = list(c, key) - item
+            prefs(c).edit().putString(key, cur.joinToString("\u0001")).apply()
+        }
     }
 }
 
@@ -199,7 +222,9 @@ fun MinimalHome(
     var showTodos by remember { mutableStateOf(false) }
     var showNotes by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) { apps = loadApps() }
+    LaunchedEffect(Unit) {
+        apps = withContext(Dispatchers.Default) { loadApps() }
+    }
     LaunchedEffect(Unit) {
         while (true) {
             val now = Date()
