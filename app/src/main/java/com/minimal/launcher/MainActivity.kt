@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -65,19 +67,39 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            val pager = rememberPagerState(pageCount = { 2 })
+            val ctx = LocalContext.current
+            // page 0 = settings, 1 = home, 2 = hub. start on home.
+            val pager = rememberPagerState(initialPage = 1, pageCount = { 3 })
+            val scope = rememberCoroutineScope()
+            var apps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
+            var scale by remember { mutableStateOf(TextScale.get(ctx)) }
+            var tileVersion by remember { mutableStateOf(0) }
+
+            LaunchedEffect(Unit) {
+                apps = withContext(Dispatchers.Default) { loadInstalledApps() }
+            }
+
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
                 when (page) {
-                    0 -> MinimalHome(
-                        loadApps = { loadInstalledApps() },
+                    0 -> SettingsScreen(
+                        apps = apps,
+                        scale = scale,
+                        onScaleChange = { scale = it },
+                        onTilesChanged = { tileVersion++ }
+                    )
+                    1 -> MinimalHome(
+                        apps = apps,
+                        scale = scale,
+                        tileVersion = tileVersion,
                         launchApp = { pkg ->
                             runCatching {
                                 packageManager.getLaunchIntentForPackage(pkg)?.let(::startActivity)
                             }
                         },
-                        runIntent = { runCatching { startActivity(it) } }
+                        runIntent = { runCatching { startActivity(it) } },
+                        goToHub = { scope.launch { pager.animateScrollToPage(2) } }
                     )
-                    1 -> HubScreen(
+                    2 -> HubScreen(
                         hasNotificationAccess = hasNotificationAccess(),
                         onRequestCallLog = { requestCallLog() }
                     )
@@ -169,7 +191,7 @@ fun parseCommand(raw: String): Command? {
         '-' -> if (body.isNotEmpty()) Command.Todo(body) else null
         '!' -> if (body.isNotEmpty()) Command.Note(body) else null
         '*' -> if (body.isNotEmpty()) Command.Event(body) else null
-        '+' -> body.toIntOrNull()?.let { Command.Timer(it) }
+        '+' -> body.filter { it.isDigit() }.toIntOrNull()?.let { Command.Timer(it) }
         ':' -> parseTime(body)?.let { (h, m) -> Command.Alarm(h, m) }
         '?' -> if (body.isNotEmpty()) Command.Ask(body) else null
         else -> Command.Search(s)
@@ -177,9 +199,14 @@ fun parseCommand(raw: String): Command? {
 }
 
 fun parseTime(t: String): Pair<Int, Int>? {
-    val parts = t.split(':', '.').map { it.trim() }
-    val h = parts.getOrNull(0)?.toIntOrNull() ?: return null
-    val m = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    val lower = t.trim().lowercase()
+    val pm = "pm" in lower
+    val am = "am" in lower
+    val parts = lower.split(':', '.')
+    var h = parts.getOrNull(0)?.filter { it.isDigit() }?.toIntOrNull() ?: return null
+    val m = parts.getOrNull(1)?.takeWhile { it.isDigit() }?.toIntOrNull() ?: 0
+    if (pm && h in 1..11) h += 12
+    if (am && h == 12) h = 0
     return if (h in 0..23 && m in 0..59) h to m else null
 }
 
@@ -208,12 +235,14 @@ fun commandToIntent(cmd: Command): Intent? = when (cmd) {
 
 @Composable
 fun MinimalHome(
-    loadApps: () -> List<AppEntry>,
+    apps: List<AppEntry>,
+    scale: Float,
+    tileVersion: Int,
     launchApp: (String) -> Unit,
-    runIntent: (Intent) -> Unit
+    runIntent: (Intent) -> Unit,
+    goToHub: () -> Unit
 ) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    var apps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
+    val ctx = LocalContext.current
     var input by remember { mutableStateOf("") }
     var dateLine1 by remember { mutableStateOf("") }
     var dateLine2 by remember { mutableStateOf("") }
@@ -221,10 +250,8 @@ fun MinimalHome(
     var flash by remember { mutableStateOf<String?>(null) }
     var showTodos by remember { mutableStateOf(false) }
     var showNotes by remember { mutableStateOf(false) }
+    val tiles = remember(tileVersion) { TileConfig.all(ctx) }
 
-    LaunchedEffect(Unit) {
-        apps = withContext(Dispatchers.Default) { loadApps() }
-    }
     LaunchedEffect(Unit) {
         while (true) {
             val now = Date()
@@ -234,6 +261,19 @@ fun MinimalHome(
         }
     }
     LaunchedEffect(flash) { if (flash != null) { delay(1800); flash = null } }
+
+    fun handleTile(value: String) {
+        if (value.startsWith("app:")) {
+            launchApp(value.removePrefix("app:"))
+            return
+        }
+        when (val key = value.removePrefix("action:")) {
+            "note" -> { showNotes = !showNotes; showTodos = false }
+            "todo" -> { showTodos = !showTodos; showNotes = false }
+            "hub" -> goToHub()
+            else -> BuiltInActions.intentFor(key)?.let(runIntent)
+        }
+    }
 
     fun execute(raw: String) {
         when (val cmd = parseCommand(raw)) {
@@ -268,59 +308,76 @@ fun MinimalHome(
     ) {
         Spacer(Modifier.height(48.dp))
 
-        Text(dateLine1, color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Medium)
-        Text(dateLine2, color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Medium)
+        Text(dateLine1, color = Ink, fontSize = (30 * scale).sp, fontWeight = FontWeight.Medium)
+        Text(dateLine2, color = Ink, fontSize = (30 * scale).sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(6.dp))
-        Text("☀ sunny", color = Dim, fontFamily = Mono, fontSize = 13.sp)
+        Text("☀ sunny", color = Dim, fontFamily = Mono, fontSize = (13 * scale).sp)
 
         Spacer(Modifier.height(14.dp))
         DottedDivider()
         Spacer(Modifier.height(14.dp))
 
         Chip(onClick = { runIntent(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR)) }) {
-            Text("▤ ", color = Accent, fontFamily = Mono, fontSize = 14.sp)
-            Text("calendar · today", color = Ink, fontSize = 15.sp)
+            Text("▤ ", color = Accent, fontFamily = Mono, fontSize = (14 * scale).sp)
+            Text("calendar · today", color = Ink, fontSize = (15 * scale).sp)
         }
         Spacer(Modifier.height(10.dp))
         Chip(onClick = { showTodos = !showTodos; showNotes = false }) {
-            Text("≡ ", color = Accent, fontFamily = Mono, fontSize = 14.sp)
-            Text("to-dos", color = Ink, fontSize = 15.sp)
+            Text("≡ ", color = Accent, fontFamily = Mono, fontSize = (14 * scale).sp)
+            Text("to-dos", color = Ink, fontSize = (15 * scale).sp)
             Spacer(Modifier.weight(1f))
-            if (todos.isNotEmpty()) Badge(todos.size)
+            if (todos.isNotEmpty()) Badge(todos.size, scale)
         }
 
-        if (showTodos) ItemList(items = todos, empty = "nothing to do") {
+        if (showTodos) ItemList(items = todos, empty = "nothing to do", scale = scale) {
             Store.remove(ctx, "todos", it); todos = Store.list(ctx, "todos")
         }
-        if (showNotes) ItemList(items = Store.list(ctx, "notes"), empty = "no notes") {
+        if (showNotes) ItemList(items = Store.list(ctx, "notes"), empty = "no notes", scale = scale) {
             Store.remove(ctx, "notes", it)
         }
 
         Spacer(Modifier.height(18.dp))
 
-        val tiles = listOf(
-            Tile("▤", "note") { showNotes = !showNotes; showTodos = false },
-            Tile("▦", "event") { runIntent(Intent(Intent.ACTION_INSERT).apply { data = CalendarContract.Events.CONTENT_URI }) },
-            Tile("◷", "clock") { runIntent(Intent(AlarmClock.ACTION_SHOW_ALARMS)) },
-            Tile("≣", "to do") { showTodos = !showTodos; showNotes = false },
-            Tile("✆", "call") { runIntent(Intent(Intent.ACTION_DIAL)) },
-            Tile("▭", "message") { runIntent(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_MESSAGING)) },
-            Tile("◉", "camera") { runIntent(Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)) },
-            Tile("●", "memo") { runIntent(Intent(MediaStore.Audio.Media.RECORD_SOUND_ACTION)) },
-        )
-        TileGrid(tiles)
+        // configurable tile grid
+        Column {
+            tiles.chunked(4).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    row.forEach { value ->
+                        val (glyph, label) = describeTile(ctx, value)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(ChipShape)
+                                .border(1.dp, Faint, ChipShape)
+                                .clickable { handleTile(value) }
+                                .padding(vertical = 14.dp, horizontal = 2.dp)
+                        ) {
+                            Text(glyph, color = Ink, fontSize = (20 * scale).sp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                label.take(10),
+                                color = Ink, fontSize = (12 * scale).sp,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+        }
 
         Spacer(Modifier.weight(1f))
 
         flash?.let {
-            Text(it, color = Accent, fontFamily = Mono, fontSize = 13.sp)
+            Text(it, color = Accent, fontFamily = Mono, fontSize = (13 * scale).sp)
             Spacer(Modifier.height(8.dp))
         }
 
         filtered.forEach { app ->
             Text(
                 app.label.lowercase(),
-                color = Dim, fontSize = 16.sp,
+                color = Dim, fontSize = (16 * scale).sp,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { launchApp(app.packageName); input = "" }
@@ -331,17 +388,17 @@ fun MinimalHome(
         BasicTextField(
             value = input,
             onValueChange = { input = it },
-            textStyle = TextStyle(color = Ink, fontFamily = Mono, fontSize = 17.sp),
+            textStyle = TextStyle(color = Ink, fontFamily = Mono, fontSize = (17 * scale).sp),
             cursorBrush = SolidColor(Accent),
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { execute(input) }),
             decorationBox = { inner ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("> ", color = Accent, fontFamily = Mono, fontSize = 17.sp)
+                    Text("> ", color = Accent, fontFamily = Mono, fontSize = (17 * scale).sp)
                     Box(Modifier.weight(1f)) {
                         if (input.isEmpty())
-                            Text("type to do things", color = Faint, fontFamily = Mono, fontSize = 15.sp)
+                            Text("type to do things", color = Faint, fontFamily = Mono, fontSize = (15 * scale).sp)
                         inner()
                     }
                 }
@@ -353,39 +410,11 @@ fun MinimalHome(
         )
         Row(Modifier.padding(top = 8.dp, bottom = 20.dp)) {
             Text(
-                "@msg #call -todo !note *event +timer :alarm ?ask",
-                color = Faint, fontFamily = Mono, fontSize = 11.sp,
-                modifier = Modifier.weight(1f)
+                "← settings",
+                color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp
             )
-            Text("hub →", color = Faint, fontFamily = Mono, fontSize = 11.sp)
-        }
-    }
-}
-
-data class Tile(val glyph: String, val label: String, val onClick: () -> Unit)
-
-@Composable
-fun TileGrid(tiles: List<Tile>) {
-    Column {
-        tiles.chunked(4).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { t ->
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(ChipShape)
-                            .border(1.dp, Faint, ChipShape)
-                            .clickable { t.onClick() }
-                            .padding(vertical = 14.dp)
-                    ) {
-                        Text(t.glyph, color = Ink, fontSize = 20.sp)
-                        Spacer(Modifier.height(4.dp))
-                        Text(t.label, color = Ink, fontSize = 12.sp)
-                    }
-                }
-            }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.weight(1f))
+            Text("hub →", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
         }
     }
 }
@@ -405,15 +434,15 @@ fun Chip(onClick: () -> Unit, content: @Composable RowScope.() -> Unit) {
 }
 
 @Composable
-fun Badge(n: Int) {
+fun Badge(n: Int, scale: Float = 1f) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
-            .size(22.dp)
+            .size((22 * scale).dp)
             .clip(CircleShape)
             .background(Accent)
     ) {
-        Text("$n", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text("$n", color = Color.Black, fontSize = (12 * scale).sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -425,13 +454,13 @@ fun DottedDivider() {
 }
 
 @Composable
-fun ItemList(items: List<String>, empty: String, onRemove: (String) -> Unit) {
+fun ItemList(items: List<String>, empty: String, scale: Float = 1f, onRemove: (String) -> Unit) {
     Column(Modifier.padding(top = 8.dp, start = 4.dp)) {
-        if (items.isEmpty()) Text(empty, color = Faint, fontFamily = Mono, fontSize = 13.sp)
+        if (items.isEmpty()) Text(empty, color = Faint, fontFamily = Mono, fontSize = (13 * scale).sp)
         items.forEach { item ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("– $item", color = Dim, fontFamily = Mono, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                Text("×", color = Faint, fontSize = 16.sp,
+                Text("– $item", color = Dim, fontFamily = Mono, fontSize = (14 * scale).sp, modifier = Modifier.weight(1f))
+                Text("×", color = Faint, fontSize = (16 * scale).sp,
                     modifier = Modifier.clickable { onRemove(item) }.padding(6.dp))
             }
         }
