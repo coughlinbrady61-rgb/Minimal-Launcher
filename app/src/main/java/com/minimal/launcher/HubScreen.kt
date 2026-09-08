@@ -183,4 +183,105 @@ fun HubRow(
     onMarkRead: () -> Unit,
     onToggleReply: () -> Unit,
     onSendReply: (String) -> Unit,
-    onCallBack: () -
+    onCallBack: () -> Unit
+) {
+    var draft by remember(item.key) { mutableStateOf("") }
+
+    val icon = when (item.type) {
+        HubType.MESSAGE -> TileIcons.message
+        HubType.CALL -> TileIcons.call
+        HubType.EMAIL -> TileIcons.email
+        HubType.APP -> TileIcons.notification
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(ChipShape)
+            .border(1.dp, if (item.unread) Dim else Color(0xFF303030), ChipShape)
+            .combinedClickable(
+                onClick = { if (item.type == HubType.CALL) onCallBack() else onOpen() },
+                onLongClick = onMarkRead
+            )
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                item.from, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f)
+            )
+            Text(relativeTime(item.timestamp), color = Dim, fontFamily = Mono, fontSize = 11.sp)
+            if (item.unread) {
+                Spacer(Modifier.width(6.dp))
+                Box(Modifier.size(7.dp).clip(CircleShape).background(Accent))
+            }
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(item.preview, color = Dim, fontSize = 13.sp, modifier = Modifier.weight(1f))
+
+            if (item.reply != null) {
+                Icon(
+                    Icons.Outlined.Send, contentDescription = "reply",
+                    tint = if (isReplying) Accent else Faint,
+                    modifier = Modifier
+                        .clickable { onToggleReply() }
+                        .padding(6.dp)
+                        .size(16.dp)
+                )
+            }
+            Icon(
+                Icons.Outlined.Flag, contentDescription = "flag",
+                tint = if (item.flagged) Accent else Faint,
+                modifier = Modifier
+                    .clickable { HubRepository.toggleFlag(item.key) }
+                    .padding(6.dp)
+                    .size(16.dp)
+            )
+            Icon(
+                Icons.Outlined.Close, contentDescription = "dismiss",
+                tint = Faint,
+                modifier = Modifier
+                    .clickable { HubRepository.dismiss(item.key) }
+                    .padding(6.dp)
+                    .size(16.dp)
+            )
+        }
+
+        if (isReplying && item.reply != null) {
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("> ", color = Accent, fontFamily = Mono, fontSize = 14.sp)
+                BasicTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    textStyle = TextStyle(color = Ink, fontFamily = Mono, fontSize = 14.sp),
+                    cursorBrush = SolidColor(Accent),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = {
+                        if (draft.isNotBlank()) { onSendReply(draft); draft = "" }
+                    }),
+                    decorationBox = { inner ->
+                        Box {
+                            if (draft.isEmpty())
+                                Text("message", color = Faint, fontFamily = Mono, fontSize = 14.sp)
+                            inner()
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "send",
+                    color = if (draft.isBlank()) Faint else Accent,
+                    fontFamily = Mono, fontSize = 13.sp,
+                    modifier = Modifier
+                        .clickable { if (draft.isNotBlank()) { onSendReply(draft); draft = "" } }
+                        .padding(start = 10.dp, top = 4.dp, bottom = 4.dp)
+                )
+            }
+        }
+    }
+}
