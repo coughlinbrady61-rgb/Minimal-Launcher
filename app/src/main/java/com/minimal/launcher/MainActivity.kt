@@ -13,6 +13,7 @@ import android.provider.CalendarContract
 import android.provider.MediaStore
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -60,6 +61,8 @@ val Mono = FontFamily.Monospace
 
 data class AppEntry(val label: String, val packageName: String)
 
+enum class Overlay { NONE, CALENDAR, NOTES }
+
 class MainActivity : ComponentActivity() {
 
     private val callLogPermission =
@@ -79,12 +82,28 @@ class MainActivity : ComponentActivity() {
             var apps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
             var scale by remember { mutableStateOf(TextScale.get(ctx)) }
             var tileVersion by remember { mutableStateOf(0) }
+            var overlay by remember { mutableStateOf(Overlay.NONE) }
 
             LaunchedEffect(Unit) {
                 apps = withContext(Dispatchers.Default) { loadInstalledApps() }
                 if (!Agenda.hasPermission(ctx)) {
                     runCatching { calendarPermission.launch(Manifest.permission.READ_CALENDAR) }
                 }
+            }
+
+            // back button closes an overlay instead of doing nothing
+            BackHandler(enabled = overlay != Overlay.NONE) { overlay = Overlay.NONE }
+
+            when (overlay) {
+                Overlay.CALENDAR -> {
+                    CalendarScreen(scale = scale, onClose = { overlay = Overlay.NONE })
+                    return@setContent
+                }
+                Overlay.NOTES -> {
+                    NotesScreen(scale = scale, onClose = { overlay = Overlay.NONE })
+                    return@setContent
+                }
+                Overlay.NONE -> {}
             }
 
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
@@ -108,7 +127,9 @@ class MainActivity : ComponentActivity() {
                         goToHub = { scope.launch { pager.animateScrollToPage(2) } },
                         requestCalendar = {
                             runCatching { calendarPermission.launch(Manifest.permission.READ_CALENDAR) }
-                        }
+                        },
+                        openCalendar = { overlay = Overlay.CALENDAR },
+                        openNotes = { overlay = Overlay.NOTES }
                     )
                     2 -> HubScreen(
                         hasNotificationAccess = hasNotificationAccess(),
@@ -227,10 +248,6 @@ fun commandToIntent(cmd: Command): Intent? = when (cmd) {
     }
     is Command.Call -> Intent(Intent.ACTION_DIAL,
         if (cmd.target.all { it.isDigit() || it == '+' }) Uri.parse("tel:${cmd.target}") else null)
-    is Command.Event -> Intent(Intent.ACTION_INSERT).apply {
-        data = CalendarContract.Events.CONTENT_URI
-        putExtra(CalendarContract.Events.TITLE, cmd.text)
-    }
     is Command.Timer -> Intent(AlarmClock.ACTION_SET_TIMER).apply {
         putExtra(AlarmClock.EXTRA_LENGTH, cmd.minutes * 60)
         putExtra(AlarmClock.EXTRA_MESSAGE, "timer")
@@ -252,7 +269,9 @@ fun MinimalHome(
     launchApp: (String) -> Unit,
     runIntent: (Intent) -> Unit,
     goToHub: () -> Unit,
-    requestCalendar: () -> Unit
+    requestCalendar: () -> Unit,
+    openCalendar: () -> Unit,
+    openNotes: () -> Unit
 ) {
     val ctx = LocalContext.current
     var input by remember { mutableStateOf("") }
@@ -262,10 +281,8 @@ fun MinimalHome(
     var flash by remember { mutableStateOf<String?>(null) }
     var answer by remember { mutableStateOf<String?>(null) }
     var showTodos by remember { mutableStateOf(false) }
-    var showNotes by remember { mutableStateOf(false) }
     val tiles = remember(tileVersion) { TileConfig.all(ctx) }
 
-    // spacing that tightens as text grows, so tall text doesn't crowd the input
     val topPad = (52f - (scale * 12f)).coerceIn(28f, 46f).dp
     val boxPad = (16f - (scale * 5f)).coerceIn(7f, 12f).dp
     val tilePad = (18f - (scale * 5f)).coerceIn(9f, 15f).dp
@@ -287,8 +304,9 @@ fun MinimalHome(
             return
         }
         when (val key = value.removePrefix("action:")) {
-            "note" -> { showNotes = !showNotes; showTodos = false }
-            "todo" -> { showTodos = !showTodos; showNotes = false }
+            "note" -> openNotes()
+            "event" -> openCalendar()
+            "todo" -> { showTodos = !showTodos; answer = null }
             "hub" -> goToHub()
             else -> BuiltInActions.intentFor(key)?.let(runIntent)
         }
@@ -297,16 +315,16 @@ fun MinimalHome(
     fun execute(raw: String) {
         when (val cmd = parseCommand(raw)) {
             is Command.Todo -> { Store.add(ctx, "todos", cmd.text); todos = Store.list(ctx, "todos"); flash = "added to-do" }
-            is Command.Note -> { Store.add(ctx, "notes", cmd.text); flash = "noted" }
+            is Command.Note -> { NotesStore.upsert(ctx, null, cmd.text); flash = "noted" }
+            is Command.Event -> { openCalendar() }
             is Command.Message -> commandToIntent(cmd)?.let(runIntent)
             is Command.Call -> commandToIntent(cmd)?.let(runIntent)
-            is Command.Event -> commandToIntent(cmd)?.let(runIntent)
             is Command.Timer -> commandToIntent(cmd)?.let(runIntent)
             is Command.Alarm -> commandToIntent(cmd)?.let(runIntent)
             is Command.Ask -> {
                 if (!Agenda.hasPermission(ctx)) requestCalendar()
                 answer = Agenda.answer(ctx, cmd.question)
-                showTodos = false; showNotes = false
+                showTodos = false
             }
             is Command.Search -> {
                 val hit = apps.firstOrNull { it.label.contains(raw.trim(), true) }
@@ -340,7 +358,7 @@ fun MinimalHome(
         DottedDivider()
         Spacer(Modifier.height(gap))
 
-        Chip(onClick = { runIntent(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR)) }, pad = boxPad) {
+        Chip(onClick = { openCalendar() }, pad = boxPad) {
             Icon(
                 TileIcons.calendar, contentDescription = null,
                 tint = Accent, modifier = Modifier.size((17 * scale).dp)
@@ -349,7 +367,7 @@ fun MinimalHome(
             Text("calendar · today", color = Ink, fontSize = (15 * scale).sp)
         }
         Spacer(Modifier.height(8.dp))
-        Chip(onClick = { showTodos = !showTodos; showNotes = false; answer = null }, pad = boxPad) {
+        Chip(onClick = { showTodos = !showTodos; answer = null }, pad = boxPad) {
             Icon(
                 TileIcons.checklist, contentDescription = null,
                 tint = Accent, modifier = Modifier.size((17 * scale).dp)
@@ -362,9 +380,6 @@ fun MinimalHome(
 
         if (showTodos) ItemList(items = todos, empty = "nothing to do", scale = scale) {
             Store.remove(ctx, "todos", it); todos = Store.list(ctx, "todos")
-        }
-        if (showNotes) ItemList(items = Store.list(ctx, "notes"), empty = "no notes", scale = scale) {
-            Store.remove(ctx, "notes", it)
         }
 
         answer?.let { text ->
