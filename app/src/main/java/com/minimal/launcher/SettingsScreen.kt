@@ -116,7 +116,10 @@ fun SettingsScreen(
     apps: List<AppEntry>,
     scale: Float,
     onScaleChange: (Float) -> Unit,
-    onTilesChanged: () -> Unit
+    onTilesChanged: () -> Unit,
+    onOpenFocus: () -> Unit = {},
+    focusVersion: Int = 0,
+    onFocusToggled: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
     var editingTile by remember { mutableStateOf<Int?>(null) }
@@ -185,7 +188,58 @@ fun SettingsScreen(
         }
         Text("tap a tile to change it", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
 
-        Spacer(Modifier.height(26.dp))
+        Spacer(Modifier.height(24.dp))
+
+        Text("FOCUS", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
+        Spacer(Modifier.height(10.dp))
+
+        val focusOn = remember(focusVersion) { FocusMode.isOn(ctx) }
+        val hiddenCount = remember(focusVersion) { FocusMode.blocked(ctx).size }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(ChipShape)
+                .border(1.dp, if (focusOn) Accent else Faint, ChipShape)
+                .clickable { FocusMode.setOn(ctx, !focusOn); onFocusToggled() }
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (focusOn) "focus mode on" else "focus mode off",
+                    color = if (focusOn) Accent else Ink, fontSize = (15 * scale).sp
+                )
+                Text(
+                    "$hiddenCount apps hidden while on",
+                    color = Faint, fontFamily = Mono, fontSize = (10 * scale).sp
+                )
+            }
+            Box(
+                Modifier
+                    .size((20 * scale).dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(if (focusOn) Accent else Color.Transparent)
+                    .border(1.dp, if (focusOn) Accent else Dim, androidx.compose.foundation.shape.CircleShape)
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(ChipShape)
+                .border(1.dp, Faint, ChipShape)
+                .clickable { onOpenFocus() }
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Text("choose hidden apps", color = Ink, fontSize = (14 * scale).sp, modifier = Modifier.weight(1f))
+            Text("›", color = Accent, fontSize = (16 * scale).sp)
+        }
+
+        Spacer(Modifier.height(24.dp))
 
         Text("TEXT SIZE", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
         Spacer(Modifier.height(10.dp))
