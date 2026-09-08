@@ -21,11 +21,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -65,6 +67,9 @@ class MainActivity : ComponentActivity() {
             if (granted) runCatching { HubRepository.loadCallLog(this) }
         }
 
+    private val calendarPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -77,6 +82,9 @@ class MainActivity : ComponentActivity() {
 
             LaunchedEffect(Unit) {
                 apps = withContext(Dispatchers.Default) { loadInstalledApps() }
+                if (!Agenda.hasPermission(ctx)) {
+                    runCatching { calendarPermission.launch(Manifest.permission.READ_CALENDAR) }
+                }
             }
 
             HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
@@ -97,7 +105,10 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         runIntent = { runCatching { startActivity(it) } },
-                        goToHub = { scope.launch { pager.animateScrollToPage(2) } }
+                        goToHub = { scope.launch { pager.animateScrollToPage(2) } },
+                        requestCalendar = {
+                            runCatching { calendarPermission.launch(Manifest.permission.READ_CALENDAR) }
+                        }
                     )
                     2 -> HubScreen(
                         hasNotificationAccess = hasNotificationAccess(),
@@ -193,7 +204,7 @@ fun parseCommand(raw: String): Command? {
         '*' -> if (body.isNotEmpty()) Command.Event(body) else null
         '+' -> body.filter { it.isDigit() }.toIntOrNull()?.let { Command.Timer(it) }
         ':' -> parseTime(body)?.let { (h, m) -> Command.Alarm(h, m) }
-        '?' -> if (body.isNotEmpty()) Command.Ask(body) else null
+        '?' -> Command.Ask(body)
         else -> Command.Search(s)
     }
 }
@@ -240,7 +251,8 @@ fun MinimalHome(
     tileVersion: Int,
     launchApp: (String) -> Unit,
     runIntent: (Intent) -> Unit,
-    goToHub: () -> Unit
+    goToHub: () -> Unit,
+    requestCalendar: () -> Unit
 ) {
     val ctx = LocalContext.current
     var input by remember { mutableStateOf("") }
@@ -248,6 +260,7 @@ fun MinimalHome(
     var dateLine2 by remember { mutableStateOf("") }
     var todos by remember { mutableStateOf(Store.list(ctx, "todos")) }
     var flash by remember { mutableStateOf<String?>(null) }
+    var answer by remember { mutableStateOf<String?>(null) }
     var showTodos by remember { mutableStateOf(false) }
     var showNotes by remember { mutableStateOf(false) }
     val tiles = remember(tileVersion) { TileConfig.all(ctx) }
@@ -284,7 +297,11 @@ fun MinimalHome(
             is Command.Event -> commandToIntent(cmd)?.let(runIntent)
             is Command.Timer -> commandToIntent(cmd)?.let(runIntent)
             is Command.Alarm -> commandToIntent(cmd)?.let(runIntent)
-            is Command.Ask -> flash = "ask: not wired up yet"
+            is Command.Ask -> {
+                if (!Agenda.hasPermission(ctx)) requestCalendar()
+                answer = Agenda.answer(ctx, cmd.question)
+                showTodos = false; showNotes = false
+            }
             is Command.Search -> {
                 val hit = apps.firstOrNull { it.label.contains(raw.trim(), true) }
                 if (hit != null) launchApp(hit.packageName) else flash = "no app match"
@@ -326,7 +343,7 @@ fun MinimalHome(
             Text("calendar · today", color = Ink, fontSize = (15 * scale).sp)
         }
         Spacer(Modifier.height(10.dp))
-        Chip(onClick = { showTodos = !showTodos; showNotes = false }) {
+        Chip(onClick = { showTodos = !showTodos; showNotes = false; answer = null }) {
             Icon(
                 TileIcons.checklist, contentDescription = null,
                 tint = Accent, modifier = Modifier.size((17 * scale).dp)
@@ -342,6 +359,32 @@ fun MinimalHome(
         }
         if (showNotes) ItemList(items = Store.list(ctx, "notes"), empty = "no notes", scale = scale) {
             Store.remove(ctx, "notes", it)
+        }
+
+        // ---- answer panel ----
+        answer?.let { text ->
+            Spacer(Modifier.height(12.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(ChipShape)
+                    .border(1.dp, Accent, ChipShape)
+                    .padding(14.dp)
+            ) {
+                Text(
+                    text,
+                    color = Ink, fontFamily = Mono, fontSize = (13 * scale).sp,
+                    modifier = Modifier
+                        .heightIn(max = 240.dp)
+                        .verticalScroll(rememberScrollState())
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "dismiss",
+                    color = Accent, fontFamily = Mono, fontSize = (11 * scale).sp,
+                    modifier = Modifier.clickable { answer = null }
+                )
+            }
         }
 
         Spacer(Modifier.height(18.dp))
@@ -421,6 +464,8 @@ fun MinimalHome(
         )
         Row(Modifier.padding(top = 8.dp, bottom = 20.dp)) {
             Text("← settings", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
+            Spacer(Modifier.weight(1f))
+            Text("?today ?next ?free", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
             Spacer(Modifier.weight(1f))
             Text("hub →", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
         }
