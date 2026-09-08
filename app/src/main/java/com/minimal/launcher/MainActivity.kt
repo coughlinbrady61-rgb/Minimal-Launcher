@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -68,7 +69,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             val ctx = LocalContext.current
-            // page 0 = settings, 1 = home, 2 = hub. start on home.
             val pager = rememberPagerState(initialPage = 1, pageCount = { 3 })
             val scope = rememberCoroutineScope()
             var apps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
@@ -311,19 +311,27 @@ fun MinimalHome(
         Text(dateLine1, color = Ink, fontSize = (30 * scale).sp, fontWeight = FontWeight.Medium)
         Text(dateLine2, color = Ink, fontSize = (30 * scale).sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(6.dp))
-        Text("☀ sunny", color = Dim, fontFamily = Mono, fontSize = (13 * scale).sp)
+        Text("sunny", color = Dim, fontFamily = Mono, fontSize = (13 * scale).sp)
 
         Spacer(Modifier.height(14.dp))
         DottedDivider()
         Spacer(Modifier.height(14.dp))
 
         Chip(onClick = { runIntent(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR)) }) {
-            Text("▤ ", color = Accent, fontFamily = Mono, fontSize = (14 * scale).sp)
+            Icon(
+                TileIcons.calendar, contentDescription = null,
+                tint = Accent, modifier = Modifier.size((17 * scale).dp)
+            )
+            Spacer(Modifier.width(10.dp))
             Text("calendar · today", color = Ink, fontSize = (15 * scale).sp)
         }
         Spacer(Modifier.height(10.dp))
         Chip(onClick = { showTodos = !showTodos; showNotes = false }) {
-            Text("≡ ", color = Accent, fontFamily = Mono, fontSize = (14 * scale).sp)
+            Icon(
+                TileIcons.checklist, contentDescription = null,
+                tint = Accent, modifier = Modifier.size((17 * scale).dp)
+            )
+            Spacer(Modifier.width(10.dp))
             Text("to-dos", color = Ink, fontSize = (15 * scale).sp)
             Spacer(Modifier.weight(1f))
             if (todos.isNotEmpty()) Badge(todos.size, scale)
@@ -338,12 +346,12 @@ fun MinimalHome(
 
         Spacer(Modifier.height(18.dp))
 
-        // configurable tile grid
         Column {
             tiles.chunked(4).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     row.forEach { value ->
-                        val (glyph, label) = describeTile(ctx, value)
+                        val icon = tileIconFor(value)
+                        val label = tileLabelFor(ctx, value)
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
@@ -353,8 +361,11 @@ fun MinimalHome(
                                 .clickable { handleTile(value) }
                                 .padding(vertical = 14.dp, horizontal = 2.dp)
                         ) {
-                            Text(glyph, color = Ink, fontSize = (20 * scale).sp)
-                            Spacer(Modifier.height(4.dp))
+                            Icon(
+                                icon, contentDescription = label,
+                                tint = Ink, modifier = Modifier.size((22 * scale).dp)
+                            )
+                            Spacer(Modifier.height(6.dp))
                             Text(
                                 label.take(10),
                                 color = Ink, fontSize = (12 * scale).sp,
@@ -409,10 +420,7 @@ fun MinimalHome(
                 .padding(horizontal = 14.dp, vertical = 12.dp)
         )
         Row(Modifier.padding(top = 8.dp, bottom = 20.dp)) {
-            Text(
-                "← settings",
-                color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp
-            )
+            Text("← settings", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
             Spacer(Modifier.weight(1f))
             Text("hub →", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
         }
