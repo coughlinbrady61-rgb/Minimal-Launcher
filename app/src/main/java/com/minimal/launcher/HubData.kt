@@ -13,10 +13,6 @@ import androidx.core.content.ContextCompat
 
 enum class HubType { MESSAGE, CALL, EMAIL, APP }
 
-/**
- * replyAction: the PendingIntent + RemoteInput pair an app supplies for
- * "reply from the shade". Present only when the app offers it.
- */
 data class ReplyAction(
     val pendingIntent: PendingIntent,
     val remoteInputs: Array<RemoteInput>,
@@ -61,19 +57,22 @@ object HubRepository {
 
     fun unreadCount() = items.count { it.unread }
 
-    /** Fire the notification's own intent — opens the conversation/app. */
+    /** Fire the notification's own intent, or fall back to opening the app. */
     fun open(ctx: Context, item: HubItem): Boolean {
         markRead(item.key)
-        item.contentIntent?.let { pi ->
+        val pi = item.contentIntent
+        if (pi != null && pi.isActivity) {
             val ok = runCatching { pi.send() }.isSuccess
             if (ok) return true
         }
-        // fallback: just launch the app that posted it
         if (item.packageName.isNotBlank()) {
             return runCatching {
-                ctx.packageManager.getLaunchIntentForPackage(item.packageName)?.let {
-                    ctx.startActivity(it); true
-                } ?: false
+                val launch = ctx.packageManager.getLaunchIntentForPackage(item.packageName)
+                if (launch != null) {
+                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    ctx.startActivity(launch)
+                    true
+                } else false
             }.getOrDefault(false)
         }
         return false
@@ -127,7 +126,7 @@ object HubRepository {
                             preview = label,
                             timestamp = c.getLong(dateIx),
                             unread = callType == CallLog.Calls.MISSED_TYPE,
-                            packageName = number   // reused: number to call back
+                            packageName = number
                         )
                     )
                 }
