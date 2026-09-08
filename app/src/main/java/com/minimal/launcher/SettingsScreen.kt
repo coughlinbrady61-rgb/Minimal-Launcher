@@ -2,7 +2,6 @@ package com.minimal.launcher
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.provider.MediaStore
@@ -12,24 +11,20 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-// ---------- tile model ----------
-// A tile is either a built-in action (stored as "action:note") or an app ("app:com.spotify.music")
-
-data class TileSlot(val id: Int, val value: String)
-
 object BuiltInActions {
-    // key to display label
     val all = listOf(
         "note" to "note",
         "event" to "event",
@@ -46,21 +41,6 @@ object BuiltInActions {
 
     fun labelFor(key: String) = all.firstOrNull { it.first == key }?.second ?: key
 
-    fun glyphFor(key: String) = when (key) {
-        "note" -> "▤"
-        "event" -> "▦"
-        "clock" -> "◷"
-        "todo" -> "≣"
-        "call" -> "✆"
-        "message" -> "▭"
-        "camera" -> "◉"
-        "memo" -> "●"
-        "timer" -> "◔"
-        "alarm" -> "◑"
-        "hub" -> "◈"
-        else -> "○"
-    }
-
     fun intentFor(key: String): Intent? = when (key) {
         "event" -> Intent(Intent.ACTION_INSERT).apply { data = CalendarContract.Events.CONTENT_URI }
         "clock" -> Intent(AlarmClock.ACTION_SHOW_ALARMS)
@@ -70,7 +50,7 @@ object BuiltInActions {
         "memo" -> Intent(MediaStore.Audio.Media.RECORD_SOUND_ACTION)
         "timer" -> Intent(AlarmClock.ACTION_SET_TIMER)
         "alarm" -> Intent(AlarmClock.ACTION_SET_ALARM)
-        else -> null   // note / todo / hub handled inside the launcher
+        else -> null
     }
 }
 
@@ -102,8 +82,7 @@ object TextScale {
     private const val KEY = "text_scale"
 
     fun get(ctx: Context): Float = runCatching {
-        ctx.getSharedPreferences("minimal_store", Context.MODE_PRIVATE)
-            .getFloat(KEY, 1.0f)
+        ctx.getSharedPreferences("minimal_store", Context.MODE_PRIVATE).getFloat(KEY, 1.0f)
     }.getOrDefault(1.0f)
 
     fun set(ctx: Context, v: Float) {
@@ -114,7 +93,24 @@ object TextScale {
     }
 }
 
-// ---------- settings screen ----------
+// ---------- shared helpers ----------
+fun tileIconFor(value: String): ImageVector =
+    if (value.startsWith("app:")) TileIcons.app
+    else TileIcons.forAction(value.removePrefix("action:"))
+
+fun tileLabelFor(ctx: Context, value: String): String =
+    if (value.startsWith("app:")) {
+        val pkg = value.removePrefix("app:")
+        runCatching {
+            ctx.packageManager.getApplicationLabel(
+                ctx.packageManager.getApplicationInfo(pkg, 0)
+            ).toString().lowercase()
+        }.getOrDefault(pkg.substringAfterLast('.'))
+    } else {
+        BuiltInActions.labelFor(value.removePrefix("action:"))
+    }
+
+// ---------- settings ----------
 @Composable
 fun SettingsScreen(
     apps: List<AppEntry>,
@@ -160,13 +156,12 @@ fun SettingsScreen(
         Text("TILES", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
         Spacer(Modifier.height(10.dp))
 
-        // editable tile grid
         Column {
             tiles.chunked(4).forEachIndexed { rowIx, row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     row.forEachIndexed { colIx, value ->
                         val index = rowIx * 4 + colIx
-                        val (glyph, label) = describeTile(ctx, value)
+                        val label = tileLabelFor(ctx, value)
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
@@ -176,13 +171,12 @@ fun SettingsScreen(
                                 .clickable { editingTile = index }
                                 .padding(vertical = 12.dp, horizontal = 2.dp)
                         ) {
-                            Text(glyph, color = Ink, fontSize = (18 * scale).sp)
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                label.take(10),
-                                color = Ink, fontSize = (10 * scale).sp,
-                                maxLines = 1
+                            Icon(
+                                tileIconFor(value), contentDescription = label,
+                                tint = Ink, modifier = Modifier.size((20 * scale).dp)
                             )
+                            Spacer(Modifier.height(5.dp))
+                            Text(label.take(10), color = Ink, fontSize = (10 * scale).sp, maxLines = 1)
                         }
                     }
                 }
@@ -229,7 +223,6 @@ fun SettingsScreen(
     }
 }
 
-// ---------- tile picker ----------
 @Composable
 fun TilePicker(
     apps: List<AppEntry>,
@@ -237,8 +230,6 @@ fun TilePicker(
     onPick: (String) -> Unit,
     onCancel: () -> Unit
 ) {
-    var query by remember { mutableStateOf("") }
-
     Column(
         Modifier
             .fillMaxSize()
@@ -269,10 +260,11 @@ fun TilePicker(
                         .clickable { onPick("action:$key") }
                         .padding(vertical = 10.dp)
                 ) {
-                    Text(
-                        BuiltInActions.glyphFor(key) + "  ",
-                        color = Accent, fontSize = (16 * scale).sp
+                    Icon(
+                        TileIcons.forAction(key), contentDescription = null,
+                        tint = Accent, modifier = Modifier.size((18 * scale).dp)
                     )
+                    Spacer(Modifier.width(12.dp))
                     Text(label, color = Ink, fontSize = (16 * scale).sp)
                 }
             }
@@ -282,32 +274,22 @@ fun TilePicker(
                 Spacer(Modifier.height(8.dp))
             }
             items(apps) { app ->
-                Text(
-                    app.label.lowercase(),
-                    color = Ink, fontSize = (16 * scale).sp,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onPick("app:${app.packageName}") }
                         .padding(vertical = 10.dp)
-                )
+                ) {
+                    Icon(
+                        TileIcons.app, contentDescription = null,
+                        tint = Dim, modifier = Modifier.size((18 * scale).dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(app.label.lowercase(), color = Ink, fontSize = (16 * scale).sp)
+                }
             }
             item { Spacer(Modifier.height(30.dp)) }
         }
-    }
-}
-
-// ---------- helpers ----------
-fun describeTile(ctx: Context, value: String): Pair<String, String> {
-    return if (value.startsWith("action:")) {
-        val key = value.removePrefix("action:")
-        BuiltInActions.glyphFor(key) to BuiltInActions.labelFor(key)
-    } else {
-        val pkg = value.removePrefix("app:")
-        val label = runCatching {
-            ctx.packageManager.getApplicationLabel(
-                ctx.packageManager.getApplicationInfo(pkg, 0)
-            ).toString().lowercase()
-        }.getOrDefault(pkg.substringAfterLast('.'))
-        "▢" to label
     }
 }
