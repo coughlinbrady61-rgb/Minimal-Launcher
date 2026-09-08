@@ -190,6 +190,41 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
+        Text("WEATHER", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
+        Spacer(Modifier.height(10.dp))
+
+        var weatherOn by remember { mutableStateOf(Weather.enabled(ctx)) }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(ChipShape)
+                .border(1.dp, if (weatherOn) Accent else Faint, ChipShape)
+                .clickable { weatherOn = !weatherOn; Weather.setEnabled(ctx, weatherOn) }
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (weatherOn) "show weather" else "weather hidden",
+                    color = if (weatherOn) Ink else Dim, fontSize = (14 * scale).sp
+                )
+                Text(
+                    if (Weather.hasLocationPermission(ctx)) "open-meteo · updates every 15 min"
+                    else "needs location permission",
+                    color = Faint, fontFamily = Mono, fontSize = (10 * scale).sp
+                )
+            }
+            Box(
+                Modifier
+                    .size((20 * scale).dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(if (weatherOn) Accent else Color.Transparent)
+                    .border(1.dp, if (weatherOn) Accent else Dim, androidx.compose.foundation.shape.CircleShape)
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+
         Text("FOCUS", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
         Spacer(Modifier.height(10.dp))
 
