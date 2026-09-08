@@ -312,6 +312,8 @@ fun MinimalHome(
     var answer by remember { mutableStateOf<String?>(null) }
     var showTodos by remember { mutableStateOf(false) }
     val tiles = remember(tileVersion) { TileConfig.all(ctx) }
+    val focusOn = remember(focusVersion) { FocusMode.isOn(ctx) }
+    val hidden = remember(focusVersion) { FocusMode.blocked(ctx) }
 
     val topPad = (52f - (scale * 12f)).coerceIn(28f, 46f).dp
     val boxPad = (16f - (scale * 5f)).coerceIn(7f, 12f).dp
@@ -369,9 +371,6 @@ fun MinimalHome(
         }
         input = ""
     }
-
-    val focusOn = remember(focusVersion) { FocusMode.isOn(ctx) }
-    val hidden = remember(focusVersion) { FocusMode.blocked(ctx) }
 
     val filtered = remember(input, apps, focusVersion) {
         val q = input.trim()
