@@ -9,6 +9,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,8 +48,10 @@ fun HubScreen(hasNotificationAccess: Boolean, onRequestCallLog: () -> Unit) {
             Text("hub", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Medium)
             if (unread > 0) {
                 Spacer(Modifier.width(10.dp))
-                Text("$unread new", color = Accent, fontFamily = Mono, fontSize = 13.sp,
-                    modifier = Modifier.padding(bottom = 6.dp))
+                Text(
+                    "$unread new", color = Accent, fontFamily = Mono, fontSize = 13.sp,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
             }
         }
         Text(
@@ -80,7 +86,9 @@ fun HubScreen(hasNotificationAccess: Boolean, onRequestCallLog: () -> Unit) {
 
         if (!hasNotificationAccess) {
             Chip(onClick = {
-                ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                runCatching {
+                    ctx.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                }
             }) {
                 Text("enable notification access →", color = Accent, fontFamily = Mono, fontSize = 13.sp)
             }
@@ -102,8 +110,10 @@ fun HubScreen(hasNotificationAccess: Boolean, onRequestCallLog: () -> Unit) {
         }
 
         if (visible.isEmpty()) {
-            Text("nothing here", color = Faint, fontFamily = Mono, fontSize = 13.sp,
-                modifier = Modifier.padding(top = 24.dp))
+            Text(
+                "nothing here", color = Faint, fontFamily = Mono, fontSize = 13.sp,
+                modifier = Modifier.padding(top = 24.dp)
+            )
         }
 
         LazyColumn(Modifier.weight(1f)) {
@@ -114,7 +124,7 @@ fun HubScreen(hasNotificationAccess: Boolean, onRequestCallLog: () -> Unit) {
         }
 
         Text(
-            "→ one swipe left goes back home",
+            "← swipe left goes back home",
             color = Faint, fontFamily = Mono, fontSize = 11.sp,
             modifier = Modifier.padding(vertical = 14.dp)
         )
@@ -123,11 +133,11 @@ fun HubScreen(hasNotificationAccess: Boolean, onRequestCallLog: () -> Unit) {
 
 @Composable
 fun HubRow(item: HubItem) {
-    val glyph = when (item.type) {
-        HubType.MESSAGE -> "▭"
-        HubType.CALL -> "✆"
-        HubType.EMAIL -> "▤"
-        HubType.APP -> "◌"
+    val icon = when (item.type) {
+        HubType.MESSAGE -> TileIcons.message
+        HubType.CALL -> TileIcons.call
+        HubType.EMAIL -> TileIcons.email
+        HubType.APP -> TileIcons.notification
     }
     Column(
         Modifier
@@ -138,9 +148,12 @@ fun HubRow(item: HubItem) {
             .padding(horizontal = 14.dp, vertical = 10.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("$glyph ", color = Accent, fontSize = 14.sp)
-            Text(item.from, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f))
+            Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                item.from, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f)
+            )
             Text(relativeTime(item.timestamp), color = Dim, fontFamily = Mono, fontSize = 11.sp)
             if (item.unread) {
                 Spacer(Modifier.width(6.dp))
@@ -149,10 +162,22 @@ fun HubRow(item: HubItem) {
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(item.preview, color = Dim, fontSize = 13.sp, modifier = Modifier.weight(1f))
-            Text("⚑", color = if (item.flagged) Accent else Faint, fontSize = 13.sp,
-                modifier = Modifier.clickable { HubRepository.toggleFlag(item.key) }.padding(6.dp))
-            Text("×", color = Faint, fontSize = 16.sp,
-                modifier = Modifier.clickable { HubRepository.dismiss(item.key) }.padding(6.dp))
+            Icon(
+                Icons.Outlined.Flag, contentDescription = "flag",
+                tint = if (item.flagged) Accent else Faint,
+                modifier = Modifier
+                    .clickable { HubRepository.toggleFlag(item.key) }
+                    .padding(6.dp)
+                    .size(16.dp)
+            )
+            Icon(
+                Icons.Outlined.Close, contentDescription = "dismiss",
+                tint = Faint,
+                modifier = Modifier
+                    .clickable { HubRepository.dismiss(item.key) }
+                    .padding(6.dp)
+                    .size(16.dp)
+            )
         }
     }
 }
