@@ -265,6 +265,12 @@ fun MinimalHome(
     var showNotes by remember { mutableStateOf(false) }
     val tiles = remember(tileVersion) { TileConfig.all(ctx) }
 
+    // spacing that tightens as text grows, so tall text doesn't crowd the input
+    val topPad = (52f - (scale * 12f)).coerceIn(28f, 46f).dp
+    val boxPad = (16f - (scale * 5f)).coerceIn(7f, 12f).dp
+    val tilePad = (18f - (scale * 5f)).coerceIn(9f, 15f).dp
+    val gap = (12f - (scale * 3f)).coerceIn(6f, 10f).dp
+
     LaunchedEffect(Unit) {
         while (true) {
             val now = Date()
@@ -323,18 +329,18 @@ fun MinimalHome(
             .background(Color.Black)
             .padding(horizontal = 22.dp)
     ) {
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(topPad))
 
         Text(dateLine1, color = Ink, fontSize = (30 * scale).sp, fontWeight = FontWeight.Medium)
         Text(dateLine2, color = Ink, fontSize = (30 * scale).sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
         Text("sunny", color = Dim, fontFamily = Mono, fontSize = (13 * scale).sp)
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(gap))
         DottedDivider()
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(gap))
 
-        Chip(onClick = { runIntent(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR)) }) {
+        Chip(onClick = { runIntent(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR)) }, pad = boxPad) {
             Icon(
                 TileIcons.calendar, contentDescription = null,
                 tint = Accent, modifier = Modifier.size((17 * scale).dp)
@@ -342,8 +348,8 @@ fun MinimalHome(
             Spacer(Modifier.width(10.dp))
             Text("calendar · today", color = Ink, fontSize = (15 * scale).sp)
         }
-        Spacer(Modifier.height(10.dp))
-        Chip(onClick = { showTodos = !showTodos; showNotes = false; answer = null }) {
+        Spacer(Modifier.height(8.dp))
+        Chip(onClick = { showTodos = !showTodos; showNotes = false; answer = null }, pad = boxPad) {
             Icon(
                 TileIcons.checklist, contentDescription = null,
                 tint = Accent, modifier = Modifier.size((17 * scale).dp)
@@ -361,24 +367,23 @@ fun MinimalHome(
             Store.remove(ctx, "notes", it)
         }
 
-        // ---- answer panel ----
         answer?.let { text ->
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
             Column(
                 Modifier
                     .fillMaxWidth()
                     .clip(ChipShape)
                     .border(1.dp, Accent, ChipShape)
-                    .padding(14.dp)
+                    .padding(12.dp)
             ) {
                 Text(
                     text,
                     color = Ink, fontFamily = Mono, fontSize = (13 * scale).sp,
                     modifier = Modifier
-                        .heightIn(max = 240.dp)
+                        .heightIn(max = 220.dp)
                         .verticalScroll(rememberScrollState())
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 Text(
                     "dismiss",
                     color = Accent, fontFamily = Mono, fontSize = (11 * scale).sp,
@@ -387,11 +392,11 @@ fun MinimalHome(
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(gap))
 
         Column {
             tiles.chunked(4).forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     row.forEach { value ->
                         val icon = tileIconFor(value)
                         val label = tileLabelFor(ctx, value)
@@ -402,13 +407,13 @@ fun MinimalHome(
                                 .clip(ChipShape)
                                 .border(1.dp, Faint, ChipShape)
                                 .clickable { handleTile(value) }
-                                .padding(vertical = 14.dp, horizontal = 2.dp)
+                                .padding(vertical = tilePad, horizontal = 2.dp)
                         ) {
                             Icon(
                                 icon, contentDescription = label,
                                 tint = Ink, modifier = Modifier.size((22 * scale).dp)
                             )
-                            Spacer(Modifier.height(6.dp))
+                            Spacer(Modifier.height(4.dp))
                             Text(
                                 label.take(10),
                                 color = Ink, fontSize = (12 * scale).sp,
@@ -417,7 +422,7 @@ fun MinimalHome(
                         }
                     }
                 }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
             }
         }
 
@@ -425,7 +430,7 @@ fun MinimalHome(
 
         flash?.let {
             Text(it, color = Accent, fontFamily = Mono, fontSize = (13 * scale).sp)
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
         }
 
         filtered.forEach { app ->
@@ -435,7 +440,7 @@ fun MinimalHome(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { launchApp(app.packageName); input = "" }
-                    .padding(vertical = 6.dp)
+                    .padding(vertical = 5.dp)
             )
         }
 
@@ -460,20 +465,20 @@ fun MinimalHome(
             modifier = Modifier
                 .fillMaxWidth()
                 .border(1.dp, Faint, ChipShape)
-                .padding(horizontal = 14.dp, vertical = 12.dp)
+                .padding(horizontal = 14.dp, vertical = boxPad)
         )
-        Row(Modifier.padding(top = 8.dp, bottom = 20.dp)) {
-            Text("← settings", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
+        Row(Modifier.padding(top = 6.dp, bottom = 14.dp)) {
+            Text("← settings", color = Faint, fontFamily = Mono, fontSize = (10 * scale).sp)
             Spacer(Modifier.weight(1f))
-            Text("?today ?next ?free", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
+            Text("?today ?next ?free", color = Faint, fontFamily = Mono, fontSize = (10 * scale).sp)
             Spacer(Modifier.weight(1f))
-            Text("hub →", color = Faint, fontFamily = Mono, fontSize = (11 * scale).sp)
+            Text("hub →", color = Faint, fontFamily = Mono, fontSize = (10 * scale).sp)
         }
     }
 }
 
 @Composable
-fun Chip(onClick: () -> Unit, content: @Composable RowScope.() -> Unit) {
+fun Chip(onClick: () -> Unit, pad: androidx.compose.ui.unit.Dp = 12.dp, content: @Composable RowScope.() -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -481,7 +486,7 @@ fun Chip(onClick: () -> Unit, content: @Composable RowScope.() -> Unit) {
             .clip(ChipShape)
             .border(1.dp, Faint, ChipShape)
             .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = 14.dp, vertical = pad),
         content = content
     )
 }
@@ -508,7 +513,7 @@ fun DottedDivider() {
 
 @Composable
 fun ItemList(items: List<String>, empty: String, scale: Float = 1f, onRemove: (String) -> Unit) {
-    Column(Modifier.padding(top = 8.dp, start = 4.dp)) {
+    Column(Modifier.padding(top = 6.dp, start = 4.dp)) {
         if (items.isEmpty()) Text(empty, color = Faint, fontFamily = Mono, fontSize = (13 * scale).sp)
         items.forEach { item ->
             Row(verticalAlignment = Alignment.CenterVertically) {
