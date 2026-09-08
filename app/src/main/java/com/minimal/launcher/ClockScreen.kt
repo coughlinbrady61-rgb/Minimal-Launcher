@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
@@ -382,16 +383,18 @@ fun AlarmTabView(scale: Float, runIntent: (Intent) -> Unit) {
 // ---------- timer ----------
 @Composable
 fun TimerTabView(scale: Float) {
-    var totalMs by remember { mutableStateOf(0L) }
-    var remaining by remember { mutableStateOf(0L) }
-    var running by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+    var remaining by remember { mutableStateOf(TimerState.remaining(ctx)) }
+    var running by remember { mutableStateOf(TimerState.isRunning(ctx)) }
     var input by remember { mutableStateOf("") }
+    var pending by remember { mutableStateOf(0L) }   // chosen but not started
 
-    LaunchedEffect(running) {
-        while (running && remaining > 0) {
-            delay(100)
-            remaining = (remaining - 100).coerceAtLeast(0)
-            if (remaining == 0L) running = false
+    // read the clock rather than counting ticks, so time away is accounted for
+    LaunchedEffect(Unit) {
+        while (true) {
+            remaining = TimerState.remaining(ctx)
+            running = TimerState.isRunning(ctx)
+            delay(250)
         }
     }
 
@@ -404,16 +407,23 @@ fun TimerTabView(scale: Float) {
         else String.format(Locale.US, "%d:%02d", m, s)
     }
 
+    val shown = if (remaining > 0) remaining else pending
+    val idle = remaining == 0L && !running
+
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            display(if (remaining > 0 || running) remaining else totalMs),
+            display(shown),
             color = if (running) Ink else Dim,
             fontSize = (48 * scale).sp, fontWeight = FontWeight.Medium, fontFamily = Mono
         )
+        if (running) {
+            Spacer(Modifier.height(4.dp))
+            Text("running in background", color = Faint, fontFamily = Mono, fontSize = (10 * scale).sp)
+        }
 
         Spacer(Modifier.height(20.dp))
 
-        if (!running && remaining == 0L) {
+        if (idle) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(1, 5, 10, 25).forEach { min ->
                     Box(
@@ -421,11 +431,8 @@ fun TimerTabView(scale: Float) {
                         modifier = Modifier
                             .weight(1f)
                             .clip(ChipShape)
-                            .border(1.dp, Faint, ChipShape)
-                            .clickable {
-                                totalMs = min * 60_000L
-                                remaining = totalMs
-                            }
+                            .border(1.dp, if (pending == min * 60_000L) Accent else Faint, ChipShape)
+                            .clickable { pending = min * 60_000L }
                             .padding(vertical = 10.dp)
                     ) {
                         Text("${min}m", color = Ink, fontFamily = Mono, fontSize = (12 * scale).sp)
@@ -436,8 +443,7 @@ fun TimerTabView(scale: Float) {
             LabeledField("or minutes", input, scale) {
                 input = it
                 val v = it.filter { c -> c.isDigit() }.toIntOrNull() ?: 0
-                totalMs = v * 60_000L
-                remaining = totalMs
+                pending = v * 60_000L
             }
         }
 
@@ -451,12 +457,18 @@ fun TimerTabView(scale: Float) {
                     .clip(ChipShape)
                     .border(1.dp, Accent, ChipShape)
                     .clickable {
-                        if (remaining > 0) running = !running
+                        when {
+                            running -> TimerState.pauseTimer(ctx)
+                            TimerState.pausedLeft(ctx) > 0 -> TimerState.resumeTimer(ctx)
+                            pending > 0 -> { TimerState.startTimer(ctx, pending); input = "" }
+                        }
+                        remaining = TimerState.remaining(ctx)
+                        running = TimerState.isRunning(ctx)
                     }
                     .padding(vertical = 12.dp)
             ) {
                 Text(
-                    if (running) "pause" else "start",
+                    if (running) "pause" else if (TimerState.pausedLeft(ctx) > 0) "resume" else "start",
                     color = Accent, fontFamily = Mono, fontSize = (14 * scale).sp
                 )
             }
@@ -467,17 +479,14 @@ fun TimerTabView(scale: Float) {
                     .clip(ChipShape)
                     .border(1.dp, Faint, ChipShape)
                     .clickable {
-                        running = false; remaining = 0; totalMs = 0; input = ""
+                        TimerState.clearAndStop(ctx)
+                        pending = 0; input = ""
+                        remaining = 0; running = false
                     }
                     .padding(vertical = 12.dp)
             ) {
                 Text("reset", color = Dim, fontFamily = Mono, fontSize = (14 * scale).sp)
             }
-        }
-
-        if (remaining == 0L && totalMs > 0 && !running) {
-            Spacer(Modifier.height(14.dp))
-            Text("time's up", color = Accent, fontFamily = Mono, fontSize = (14 * scale).sp)
         }
     }
 }
@@ -485,19 +494,21 @@ fun TimerTabView(scale: Float) {
 // ---------- stopwatch ----------
 @Composable
 fun StopwatchTabView(scale: Float) {
-    var elapsed by remember { mutableStateOf(0L) }
-    var running by remember { mutableStateOf(false) }
-    var laps by remember { mutableStateOf(listOf<Long>()) }
+    val ctx = LocalContext.current
+    var elapsed by remember { mutableStateOf(TimerState.swElapsed(ctx)) }
+    var running by remember { mutableStateOf(TimerState.swRunning(ctx)) }
+    var laps by remember { mutableStateOf(TimerState.swLaps(ctx)) }
 
-    LaunchedEffect(running) {
-        while (running) {
+    LaunchedEffect(Unit) {
+        while (true) {
+            elapsed = TimerState.swElapsed(ctx)
+            running = TimerState.swRunning(ctx)
             delay(50)
-            elapsed += 50
         }
     }
 
     fun display(ms: Long): String {
-        val total = ms / 10   // hundredths
+        val total = ms / 10
         val h = total / 360000
         val m = (total % 360000) / 6000
         val s = (total % 6000) / 100
@@ -512,6 +523,10 @@ fun StopwatchTabView(scale: Float) {
             color = Ink, fontSize = (44 * scale).sp,
             fontWeight = FontWeight.Medium, fontFamily = Mono
         )
+        if (running) {
+            Spacer(Modifier.height(4.dp))
+            Text("keeps running in background", color = Faint, fontFamily = Mono, fontSize = (10 * scale).sp)
+        }
 
         Spacer(Modifier.height(22.dp))
 
@@ -522,7 +537,10 @@ fun StopwatchTabView(scale: Float) {
                     .weight(1f)
                     .clip(ChipShape)
                     .border(1.dp, Accent, ChipShape)
-                    .clickable { running = !running }
+                    .clickable {
+                        if (running) TimerState.swStop(ctx) else TimerState.swStart(ctx)
+                        running = TimerState.swRunning(ctx)
+                    }
                     .padding(vertical = 12.dp)
             ) {
                 Text(
@@ -537,8 +555,8 @@ fun StopwatchTabView(scale: Float) {
                     .clip(ChipShape)
                     .border(1.dp, Faint, ChipShape)
                     .clickable {
-                        if (running) laps = laps + elapsed
-                        else { elapsed = 0; laps = emptyList() }
+                        if (running) { TimerState.swAddLap(ctx); laps = TimerState.swLaps(ctx) }
+                        else { TimerState.swReset(ctx); laps = emptyList(); elapsed = 0 }
                     }
                     .padding(vertical = 12.dp)
             ) {
@@ -552,15 +570,10 @@ fun StopwatchTabView(scale: Float) {
         Spacer(Modifier.height(18.dp))
 
         LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-            items(laps.reversed()) { lap ->
-                val index = laps.indexOf(lap) + 1
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 6.dp)
-                ) {
+            itemsIndexed(laps.reversed()) { i, lap ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                     Text(
-                        "lap $index", color = Dim, fontFamily = Mono, fontSize = (12 * scale).sp,
+                        "lap ${laps.size - i}", color = Dim, fontFamily = Mono, fontSize = (12 * scale).sp,
                         modifier = Modifier.weight(1f)
                     )
                     Text(display(lap), color = Ink, fontFamily = Mono, fontSize = (12 * scale).sp)
