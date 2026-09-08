@@ -76,6 +76,9 @@ class MainActivity : ComponentActivity() {
     private val notifPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    private val locationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -95,6 +98,9 @@ class MainActivity : ComponentActivity() {
                 }
                 if (android.os.Build.VERSION.SDK_INT >= 33) {
                     runCatching { notifPermission.launch("android.permission.POST_NOTIFICATIONS") }
+                }
+                if (Weather.enabled(ctx) && !Weather.hasLocationPermission(ctx)) {
+                    runCatching { locationPermission.launch(Manifest.permission.ACCESS_COARSE_LOCATION) }
                 }
             }
 
@@ -312,6 +318,7 @@ fun MinimalHome(
     var answer by remember { mutableStateOf<String?>(null) }
     var showTodos by remember { mutableStateOf(false) }
     val tiles = remember(tileVersion) { TileConfig.all(ctx) }
+    var weather by remember { mutableStateOf(Weather.cached(ctx)) }
     val focusOn = remember(focusVersion) { FocusMode.isOn(ctx) }
     val hidden = remember(focusVersion) { FocusMode.blocked(ctx) }
 
@@ -326,6 +333,13 @@ fun MinimalHome(
             dateLine1 = SimpleDateFormat("EEEE,", Locale.getDefault()).format(now).lowercase()
             dateLine2 = SimpleDateFormat("MMMM d", Locale.getDefault()).format(now).lowercase()
             delay(30_000)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            runCatching { Weather.current(ctx) }.getOrNull()?.let { weather = it }
+            delay(15 * 60 * 1000L)
         }
     }
     LaunchedEffect(flash) { if (flash != null) { delay(1800); flash = null } }
@@ -393,9 +407,11 @@ fun MinimalHome(
         Text(dateLine2, color = Ink, fontSize = (30 * scale).sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("sunny", color = Dim, fontFamily = Mono, fontSize = (13 * scale).sp)
+            weather?.let {
+                Text(it.line, color = Dim, fontFamily = Mono, fontSize = (13 * scale).sp)
+            }
             if (focusOn) {
-                Spacer(Modifier.width(10.dp))
+                if (weather != null) Spacer(Modifier.width(10.dp))
                 Text("· focus", color = Accent, fontFamily = Mono, fontSize = (12 * scale).sp)
             }
         }
