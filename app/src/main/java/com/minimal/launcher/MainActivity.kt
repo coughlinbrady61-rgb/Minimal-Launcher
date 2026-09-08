@@ -61,7 +61,7 @@ val Mono = FontFamily.Monospace
 
 data class AppEntry(val label: String, val packageName: String)
 
-enum class Overlay { NONE, CALENDAR, NOTES }
+enum class Overlay { NONE, CALENDAR, NOTES, CLOCK }
 
 class MainActivity : ComponentActivity() {
 
@@ -103,6 +103,14 @@ class MainActivity : ComponentActivity() {
                     NotesScreen(scale = scale, onClose = { overlay = Overlay.NONE })
                     return@setContent
                 }
+                Overlay.CLOCK -> {
+                    ClockScreen(
+                        scale = scale,
+                        onClose = { overlay = Overlay.NONE },
+                        runIntent = { runCatching { startActivity(it) } }
+                    )
+                    return@setContent
+                }
                 Overlay.NONE -> {}
             }
 
@@ -129,7 +137,8 @@ class MainActivity : ComponentActivity() {
                             runCatching { calendarPermission.launch(Manifest.permission.READ_CALENDAR) }
                         },
                         openCalendar = { overlay = Overlay.CALENDAR },
-                        openNotes = { overlay = Overlay.NOTES }
+                        openNotes = { overlay = Overlay.NOTES },
+                        openClock = { overlay = Overlay.CLOCK }
                     )
                     2 -> HubScreen(
                         hasNotificationAccess = hasNotificationAccess(),
@@ -271,7 +280,8 @@ fun MinimalHome(
     goToHub: () -> Unit,
     requestCalendar: () -> Unit,
     openCalendar: () -> Unit,
-    openNotes: () -> Unit
+    openNotes: () -> Unit,
+    openClock: () -> Unit
 ) {
     val ctx = LocalContext.current
     var input by remember { mutableStateOf("") }
@@ -306,6 +316,7 @@ fun MinimalHome(
         when (val key = value.removePrefix("action:")) {
             "note" -> openNotes()
             "event" -> openCalendar()
+            "clock", "timer", "alarm" -> openClock()
             "todo" -> { showTodos = !showTodos; answer = null }
             "hub" -> goToHub()
             else -> BuiltInActions.intentFor(key)?.let(runIntent)
