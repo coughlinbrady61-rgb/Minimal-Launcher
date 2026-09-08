@@ -61,7 +61,7 @@ val Mono = FontFamily.Monospace
 
 data class AppEntry(val label: String, val packageName: String)
 
-enum class Overlay { NONE, CALENDAR, NOTES, CLOCK }
+enum class Overlay { NONE, CALENDAR, NOTES, CLOCK, FOCUS }
 
 class MainActivity : ComponentActivity() {
 
@@ -85,6 +85,7 @@ class MainActivity : ComponentActivity() {
             var apps by remember { mutableStateOf<List<AppEntry>>(emptyList()) }
             var scale by remember { mutableStateOf(TextScale.get(ctx)) }
             var tileVersion by remember { mutableStateOf(0) }
+            var focusVersion by remember { mutableStateOf(0) }
             var overlay by remember { mutableStateOf(Overlay.NONE) }
 
             LaunchedEffect(Unit) {
@@ -117,6 +118,14 @@ class MainActivity : ComponentActivity() {
                     )
                     return@setContent
                 }
+                Overlay.FOCUS -> {
+                    FocusPicker(
+                        apps = apps,
+                        scale = scale,
+                        onClose = { overlay = Overlay.NONE; focusVersion++ }
+                    )
+                    return@setContent
+                }
                 Overlay.NONE -> {}
             }
 
@@ -126,7 +135,10 @@ class MainActivity : ComponentActivity() {
                         apps = apps,
                         scale = scale,
                         onScaleChange = { scale = it },
-                        onTilesChanged = { tileVersion++ }
+                        onTilesChanged = { tileVersion++ },
+                        onOpenFocus = { overlay = Overlay.FOCUS },
+                        focusVersion = focusVersion,
+                        onFocusToggled = { focusVersion++ }
                     )
                     1 -> MinimalHome(
                         apps = apps,
@@ -144,7 +156,8 @@ class MainActivity : ComponentActivity() {
                         },
                         openCalendar = { overlay = Overlay.CALENDAR },
                         openNotes = { overlay = Overlay.NOTES },
-                        openClock = { overlay = Overlay.CLOCK }
+                        openClock = { overlay = Overlay.CLOCK },
+                        focusVersion = focusVersion
                     )
                     2 -> HubScreen(
                         hasNotificationAccess = hasNotificationAccess(),
@@ -287,7 +300,8 @@ fun MinimalHome(
     requestCalendar: () -> Unit,
     openCalendar: () -> Unit,
     openNotes: () -> Unit,
-    openClock: () -> Unit
+    openClock: () -> Unit,
+    focusVersion: Int
 ) {
     val ctx = LocalContext.current
     var input by remember { mutableStateOf("") }
@@ -345,17 +359,27 @@ fun MinimalHome(
             }
             is Command.Search -> {
                 val hit = apps.firstOrNull { it.label.contains(raw.trim(), true) }
-                if (hit != null) launchApp(hit.packageName) else flash = "no app match"
+                when {
+                    hit == null -> flash = "no app match"
+                    focusOn && hit.packageName in hidden -> flash = "hidden in focus mode"
+                    else -> launchApp(hit.packageName)
+                }
             }
             null -> {}
         }
         input = ""
     }
 
-    val filtered = remember(input, apps) {
+    val focusOn = remember(focusVersion) { FocusMode.isOn(ctx) }
+    val hidden = remember(focusVersion) { FocusMode.blocked(ctx) }
+
+    val filtered = remember(input, apps, focusVersion) {
         val q = input.trim()
         if (q.isEmpty() || q.first() in "@#-!*+:?") emptyList()
-        else apps.filter { it.label.contains(q, true) }.take(6)
+        else apps
+            .filter { it.label.contains(q, true) }
+            .filter { !(focusOn && it.packageName in hidden) }
+            .take(6)
     }
 
     Column(
@@ -369,7 +393,13 @@ fun MinimalHome(
         Text(dateLine1, color = Ink, fontSize = (30 * scale).sp, fontWeight = FontWeight.Medium)
         Text(dateLine2, color = Ink, fontSize = (30 * scale).sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(4.dp))
-        Text("sunny", color = Dim, fontFamily = Mono, fontSize = (13 * scale).sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("sunny", color = Dim, fontFamily = Mono, fontSize = (13 * scale).sp)
+            if (focusOn) {
+                Spacer(Modifier.width(10.dp))
+                Text("· focus", color = Accent, fontFamily = Mono, fontSize = (12 * scale).sp)
+            }
+        }
 
         Spacer(Modifier.height(gap))
         DottedDivider()
@@ -432,23 +462,30 @@ fun MinimalHome(
                     row.forEach { value ->
                         val icon = tileIconFor(value)
                         val label = tileLabelFor(ctx, value)
+                        val tileHidden = focusOn && value.startsWith("app:") &&
+                            value.removePrefix("app:") in hidden
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(ChipShape)
                                 .border(1.dp, Faint, ChipShape)
-                                .clickable { handleTile(value) }
+                                .clickable {
+                                    if (tileHidden) flash = "hidden in focus mode"
+                                    else handleTile(value)
+                                }
                                 .padding(vertical = tilePad, horizontal = 2.dp)
                         ) {
                             Icon(
                                 icon, contentDescription = label,
-                                tint = Ink, modifier = Modifier.size((22 * scale).dp)
+                                tint = if (tileHidden) Faint else Ink,
+                                modifier = Modifier.size((22 * scale).dp)
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 label.take(10),
-                                color = Ink, fontSize = (12 * scale).sp,
+                                color = if (tileHidden) Faint else Ink,
+                                fontSize = (12 * scale).sp,
                                 maxLines = 1
                             )
                         }
