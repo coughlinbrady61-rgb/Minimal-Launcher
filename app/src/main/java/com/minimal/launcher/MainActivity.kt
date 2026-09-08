@@ -73,6 +73,9 @@ class MainActivity : ComponentActivity() {
     private val calendarPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    private val notifPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -88,6 +91,9 @@ class MainActivity : ComponentActivity() {
                 apps = withContext(Dispatchers.Default) { loadInstalledApps() }
                 if (!Agenda.hasPermission(ctx)) {
                     runCatching { calendarPermission.launch(Manifest.permission.READ_CALENDAR) }
+                }
+                if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    runCatching { notifPermission.launch("android.permission.POST_NOTIFICATIONS") }
                 }
             }
 
